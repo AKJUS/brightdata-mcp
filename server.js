@@ -14,6 +14,7 @@ const api_token = process.env.API_TOKEN;
 const unlocker_zone = process.env.WEB_UNLOCKER_ZONE || 'mcp_unlocker';
 const browser_zone = process.env.BROWSER_ZONE || 'mcp_browser';
 const pro_mode = process.env.PRO_MODE === 'true';
+const polling_timeout = parseInt(process.env.POLLING_TIMEOUT || '600', 10);
 const pro_mode_tools = ['search_engine', 'scrape_as_markdown',
     'search_engine_batch', 'scrape_batch'];
 const tool_groups = process.env.GROUPS ?
@@ -281,7 +282,7 @@ addTool({
                 .optional()
                 .describe('2-letter country code for geo-targeted results '
                     +'(e.g., "us", "uk")'),
-        })).min(1).max(10),
+        })).min(1).max(5),
     }),
     execute: tool_fn('search_engine_batch', async({queries}, ctx)=>{
         const search_promises = queries.map(({query, engine, cursor,
@@ -327,7 +328,7 @@ addTool({
             });
         });
 
-        const results = await Promise.all(search_promises);
+        const results = await Promise.allSettled(search_promises);
         return JSON.stringify(results, null, 2);
     }),
 });
@@ -344,7 +345,7 @@ addTool({
        openWorldHint: true,
    },
    parameters: z.object({
-       urls: z.array(z.string().url()).min(1).max(10).describe('Array of URLs to scrape (max 10)')
+       urls: z.array(z.string().url()).min(1).max(5).describe('Array of URLs to scrape (max 5)')
    }),
    execute: tool_fn('scrape_batch', async ({urls}, ctx)=>{
        const scrapePromises = urls.map(url =>
@@ -365,7 +366,7 @@ addTool({
            }))
        );
 
-       const results = await Promise.all(scrapePromises);
+       const results = await Promise.allSettled(scrapePromises);
        return JSON.stringify(results, null, 2);
    }),
 });
@@ -596,7 +597,9 @@ const datasets = [{
     id: 'linkedin_posts',
     dataset_id: 'gd_lyy3tktm25m4avu764',
     description: [
-        'Quickly read structured linkedin posts data',
+        'Quickly read structured linkedin posts data.',
+        'Requires a real LinkedIn post URL, for example:',
+        'linkedin.com/pulse/... or linkedin.com/posts/...',
         'This can be a cache lookup, so it can be more reliable than scraping',
     ].join('\n'),
     inputs: ['url'],
@@ -815,6 +818,23 @@ const datasets = [{
         'This can be a cache lookup, so it can be more reliable than scraping',
     ].join('\n'),
     inputs: ['url'],
+}, {
+    id: 'x_profile_posts',
+    dataset_id: 'gd_lwxkxvnf1cynvib9co',
+    description: [
+        'Quickly read structured X posts from a profile.',
+        'Requires a valid X profile URL (e.g. https://x.com/username).',
+        'Returns the most recent posts from the profile.',
+        'Optionally filter by date range using start_date and end_date',
+        '(format: YYYY-MM-DD).',
+    ].join('\n'),
+    inputs: ['url', 'start_date', 'end_date'],
+    defaults: {start_date: '', end_date: ''},
+    trigger_params: {
+        type: 'discover_new',
+        discover_by: 'profile_url_most_recent_posts',
+        limit_per_input: 10,
+    },
 },
 {
     id: 'zillow_properties_listing',
@@ -880,7 +900,8 @@ const dataset_id_to_title = id=>{
         .join(' ');
 };
 
-for (let {dataset_id, id, description, inputs, defaults = {}, fixed_values = {}} of datasets)
+for (let {dataset_id, id, description, inputs, defaults = {},
+    fixed_values = {}, trigger_params = {}} of datasets)
 {
     const tool_name = `web_data_${id}`;
     let parameters = {};
@@ -903,7 +924,7 @@ for (let {dataset_id, id, description, inputs, defaults = {}, fixed_values = {}}
             data = {...data, ...fixed_values};
             let trigger_response = await axios({
                 url: 'https://api.brightdata.com/datasets/v3/trigger',
-                params: {dataset_id, include_errors: true},
+                params: {dataset_id, include_errors: true, ...trigger_params},
                 method: 'POST',
                 data: [data],
                 headers: api_headers(ctx.clientName, tool_name),
@@ -913,7 +934,7 @@ for (let {dataset_id, id, description, inputs, defaults = {}, fixed_values = {}}
             let snapshot_id = trigger_response.data.snapshot_id;
             console.error(`[${tool_name}] triggered collection with `
                 +`snapshot ID: ${snapshot_id}`);
-            let max_attempts = 600;
+            let max_attempts = polling_timeout;
             let attempts = 0;
             while (attempts < max_attempts)
             {
