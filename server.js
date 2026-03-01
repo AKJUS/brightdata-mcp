@@ -360,9 +360,12 @@ addTool({
                },
                headers: api_headers(ctx.clientName, 'scrape_batch'),
                responseType: 'text',
-           }).then(response => ({
+           }).then(async response=>({
                url,
-               content: response.data
+               content: (await remark()
+                   .use(strip, {keep: ['link', 'linkReference', 'code',
+                       'inlineCode']})
+                   .process(response.data)).value,
            }))
        );
 
