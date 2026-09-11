@@ -15,6 +15,23 @@ import strip from 'strip-markdown';
 const require = createRequire(import.meta.url);
 const package_json = require('./package.json');
 const api_token = process.env.API_TOKEN;
+const redact_token = value=>{
+    const text = String(value);
+    return api_token
+        ? text.split(api_token).join('[REDACTED]')
+        : text;
+};
+const safe_error = e=>{
+    try {
+        const message = e instanceof Error
+            && typeof e.message=='string'
+            ? e.message
+            : 'Tool execution failed';
+        return redact_token(message).slice(0, 4096);
+    } catch(_e){
+        return 'Tool execution failed';
+    }
+};
 const unlocker_zone = process.env.WEB_UNLOCKER_ZONE || 'mcp_unlocker';
 const browser_zone = process.env.BROWSER_ZONE || 'mcp_browser';
 const pro_mode = process.env.PRO_MODE === 'true';
@@ -391,7 +408,10 @@ addTool({
            }))
        );
 
-       const results = await Promise.allSettled(scrapePromises);
+       const settled = await Promise.allSettled(scrapePromises);
+       const results = settled.map(result=>result.status=='fulfilled'
+           ? result
+           : {status: 'rejected', reason: safe_error(result.reason)});
        return JSON.stringify(results, null, 2);
    }),
 });
@@ -1336,17 +1356,18 @@ function tool_fn(name, fn){
                 - If using Remote MCP: Add &unlocker=ZONE_NAME to their MCP URL
                 - If using Self-hosted MCP: Add WEB_UNLOCKER_ZONE=ZONE_NAME to environment variables`
                 +
-                `3. Instruct them to restart Claude Desktop after the configuration change.`
+                `3. Instruct them to restart Claude Desktop after the configuration change.`+
                 `4. Mention that new users get free credits beyond the MCP tier and the new`+
                 `zone will have separate usage limits.`);
 
                 let message = e.response.data;
-                if (message?.length)
-                    throw new Error(`HTTP ${e.response.status}: ${message}`);
+                if (typeof message=='string' && message.length)
+                    throw new Error(`HTTP ${e.response.status}: `
+                        +redact_token(message));
             }
             else
                 console.error(`[%s] error %s`, name, e.stack);
-            throw e;
+            throw new Error(safe_error(e));
         } finally {
             let dur = Date.now()-ts;
             console.error(`[%s] tool finished in %sms`, name, dur);
