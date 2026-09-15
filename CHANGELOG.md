@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.11.3] - 2026-09-15
+
+### Security
+- Credentials embedded in URLs (`scheme://user:pass@host`) are now
+  redacted from error output.
+
 ## [2.11.2] - 2026-09-10
 
 ### Security
