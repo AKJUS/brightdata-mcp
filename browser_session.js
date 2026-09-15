@@ -2,6 +2,20 @@
 import * as playwright from 'playwright';
 import {Aria_snapshot_filter} from './aria_snapshot_filter.js';
 
+const cred_url_re = /((?:wss?|https?):\/\/)[^/@\s]+@/gi;
+
+const redact_url_creds = value=>
+    String(value).replace(cred_url_re, '$1[REDACTED]@');
+
+const connect_over_cdp = async endpoint=>{
+    try { return await playwright.chromium.connectOverCDP(endpoint); }
+    catch(e){
+        const err = new Error(redact_url_creds(e.message));
+        err.stack = redact_url_creds(e.stack);
+        throw err;
+    }
+};
+
 export class Browser_session {
     constructor({cdp_endpoint}){
         this.cdp_endpoint = cdp_endpoint;
@@ -50,7 +64,7 @@ export class Browser_session {
             if (!session.browser)
             {
                 log?.(`Connecting to Bright Data Scraping Browser for domain ${domain}.`);
-                session.browser = await playwright.chromium.connectOverCDP(
+                session.browser = await connect_over_cdp(
                     this.cdp_endpoint);
                 session.browserClosed = false;
                 session.browser.on('disconnected', ()=>{
@@ -65,7 +79,7 @@ export class Browser_session {
         } catch(e){
             console.error(`Error connecting to browser for domain ${domain}:`, e);
             const session = this._domainSessions.get(domain);
-            if (session) 
+            if (session)
             {
                 session.browser = null;
                 session.page = null;
@@ -76,7 +90,7 @@ export class Browser_session {
     }
 
     async get_page({url=null}={}){
-        if (url) 
+        if (url)
         {
             this._currentDomain = this._getDomain(url);
         }
